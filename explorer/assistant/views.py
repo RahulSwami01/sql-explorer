@@ -16,7 +16,7 @@ from explorer.ee.db_connections.models import DatabaseConnection
 from explorer.assistant.models import PromptLog
 from explorer.assistant.utils import (
     do_req, extract_response,
-    build_prompt
+    build_prompt,build_prompt_Quantized_sqlcoder,run_Quantized_llam_cpp_model
 )
 
 
@@ -31,9 +31,10 @@ def run_assistant(request_data, user):
     except DatabaseConnection.DoesNotExist:
         return "Error: Connection not found"
     assistant_request = request_data.get("assistant_request")
-    prompt = build_prompt(conn, assistant_request,
-                          included_tables, request_data.get("db_error"), request_data.get("sql"))
-
+    
+    #prompt = build_prompt(conn, assistant_request,included_tables, request_data.get("db_error"), request_data.get("sql"))
+    prompt=build_prompt_Quantized_sqlcoder(conn, assistant_request,included_tables)
+    print(prompt)
     start = timezone.now()
     pl = PromptLog(
         prompt=prompt,
@@ -43,12 +44,16 @@ def run_assistant(request_data, user):
         database_connection=conn
     )
     response_text = None
+    json_string = json.dumps(prompt)
     try:
-        resp = do_req(prompt)
-        response_text = extract_response(resp)
+        #resp = do_req(prompt)
+        sql_query=run_Quantized_llam_cpp_model(prompt)
+        response_text = extract_response(sql_query)
+        print(response_text)
         pl.response = response_text
     except Exception as e:
         pl.error = str(e)
+        print(e)
     finally:
         stop = timezone.now()
         pl.duration = (stop - start).total_seconds()
@@ -58,6 +63,8 @@ def run_assistant(request_data, user):
             "has_sql": bool(sql),
             "duration": pl.duration,
         }).track()
+        print("response text view.py assistant folder")
+        print(response_text)
     return response_text
 
 
