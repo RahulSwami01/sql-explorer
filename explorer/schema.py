@@ -1,5 +1,7 @@
 from django.core.cache import cache
 from django.db import ProgrammingError
+from pathlib import Path
+from simple_ddl_parser import DDLParser
 
 from explorer.app_settings import (
     EXPLORER_SCHEMA_EXCLUDE_TABLE_PREFIXES,
