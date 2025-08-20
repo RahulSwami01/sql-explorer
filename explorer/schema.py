@@ -75,7 +75,42 @@ def clear_schema_cache(db_connection):
     key = connection_schema_json_cache_key(db_connection.id)
     cache.delete(key)
 
+def build_schem_info_manual():
+    # Get the path to the current script's directory
+    current_dir = Path(__file__).parent
 
+    # Construct the full path to the file
+    #file_path = current_dir / 'my_file.txt'
+    #please clean schema file, keep simple create statements.
+    file_path = current_dir / 'schema.sql'
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            sql_script = f.read()
+    except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
+        sql_script = None
+    except Exception as e:
+        print(f"An error occurred while reading the file: {e}")
+        sql_script = None
+    parser = DDLParser(sql_script)
+    parse_results = parser.run()
+    ##print(len(parse_results))
+    # The result is typically a list of dictionaries, one for each parsed DDL statement.
+    # For a single CREATE TABLE, it will be a list with one dictionary.
+    ret=[]
+    if parse_results:
+        for i in range(len(parse_results)):
+            table_schema = parse_results[i]
+            print(f"Table Name: {table_schema.get('table_name')}")
+            #print("Columns:")
+            td = []
+            for column in table_schema.get('columns', []):
+                td.append((column.get('name'), column.get('type')))
+                ##print(f"  - Name: {column.get('name')}, Type: {column.get('type')}, Nullable: {column.get('nullable')}")
+            #print(f"Primary Key: {table_schema.get('primary_key')}")
+            ret.append((table_schema.get('table_name'), td))
+    return ret
+    
 def build_schema_info(db_connection):
     """
         Construct schema information via engine-specific queries of the
@@ -94,6 +129,11 @@ def build_schema_info(db_connection):
 
         """
     connection = db_connection.as_django_connection()
+    ## Code for Manual adding schema, Its for large database having 1000 tables. you must use manual otherwise you will put your database server in trouble.
+    if str(type(connection))!="<class 'mssql.base.DatabaseWrapper'>":
+        print("Database is too big, So return Null")
+        
+        return build_schem_info_manual()
     ret = []
     with connection.cursor() as cursor:
         tables_to_introspect = connection.introspection.table_names(
