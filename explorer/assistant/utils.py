@@ -6,6 +6,8 @@ from django.db.utils import OperationalError
 from django.db.models.functions import Lower
 from django.db.models import Q
 from explorer.assistant.models import TableDescription
+from llama_cpp import Llama
+from sqlglot import parse_one, exp
 
 
 OPENAI_MODEL = app_settings.EXPLORER_ASSISTANT_MODEL["name"]
@@ -151,6 +153,59 @@ Sample rows:\n{format_rows_from_table(self.sample)}"""
         if self.annotation:
             ret += f"\nUsage Notes:\n{self.annotation.description}"
         return ret
+def build_prompt_Quantized_sqlcoder(db_connection,assistant_request,included_tables):
+    included_tables = [t.lower() for t in included_tables]
+    table_chunks = [
+        TablePromptData(
+            name=t,
+            schema=table_schema(db_connection, t),
+            sample="", ## if you are using Chat GPT, your data will be sent outside, privacy breach, keep empty to be safe
+            annotation=get_relevant_annotation(db_connection, t)
+        ).render()
+        for t in included_tables
+    ]
+    Table_chumks_lowercase = [item.lower() for item in table_chunks]
+    prompt = f"""
+    ### Task
+    Generate a SQL query to answer the following question: `{assistant_request}`
+
+    ### Database Schema
+    This query will run on a database whose schema is represented in this string:
+    {Table_chumks_lowercase}
+
+    ### SQL
+    Given the database schema, here is the SQL query that answers `{assistant_request}`:
+    ```sql
+    """
+    return prompt
+
+def run_Quantized_llam_cpp_model(prompt):
+    ## get model of your choice
+    ##https://huggingface.co/QuantFactory/sqlcoder-7b-2-GGUF/tree/main
+    model_name ="/localfolder/sqlcoder-7b-2.Q4_0.gguf" #path of quantized model gguf fomat
+    # Initialize the Llama model
+    llm = Llama(
+        model_path=model_name,
+        n_ctx=4096,  # Max sequence length, adjust based on your needs and model capabilities
+        n_threads=8,  # Number of CPU threads to use
+        n_gpu_layers=32,  # Number of layers to offload to GPU if you have one, 0 for CPU only
+        chat_format="llama-2", # Set chat_format according to the model you are using
+        verbose=False
+    )
+    # Generate the SQL query
+    output = llm(
+        prompt,
+        max_tokens=256,  # Max tokens to generate for the SQL query
+        stop=["[/SQL]", "###"],  # Stop tokens indicating the end of the SQL query or prompt sections
+        echo=False  # Do not echo the prompt in the output
+    )
+    # Extract and print the generated SQL query
+    generated_sql = output["choices"][0]["text"].strip()
+    # The available model generate postgres sql which needs to be converted in MYSQL, 
+    # Code Enhancement can be done for different type of query engine
+    parsed_query = parse_one(generated_sql, read="postgres")
+    mysql_query = parsed_query.sql(dialect="mysql")
+    return mysql_query
 
 
 def build_prompt(db_connection, assistant_request, included_tables, query_error=None, sql=None):
